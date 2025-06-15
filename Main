@@ -1,0 +1,42 @@
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
+local original_print = print
+
+local print_proxy = newproxy(true)
+local mt_proxy = getmetatable(print_proxy)
+mt_proxy.__call = function()
+  player:Kick("print is disabled")
+  error("tamper detection: using original print is disabled!", 2)
+end
+mt_proxy.__tostring = function() return "print function is disabled" end
+
+print = print_proxy
+
+local mt = {
+  __newindex = function(t, k, v)
+    if k == "print" then
+      error("print is protected!", 2)
+    else
+      rawset(t, k, v)
+    end
+  end,
+  __index = function(t, k)
+    if k == "print" then
+      player:Kick("print is disabled")
+      return print_proxy
+    else
+      return rawget(t, k) or error("Access to global '"..tostring(k).."' is restricted", 2)
+    end
+  end,
+}
+
+setmetatable(_G, mt)
+
+function b(...)
+  local args = {...}
+  for i = 1, #args do
+    args[i] = tostring(args[i])
+  end
+  original_print(table.concat(args, " "))
+end
