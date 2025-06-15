@@ -1,0 +1,137 @@
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+
+local original_print = print
+
+local print_proxy = newproxy(true)
+local mt_proxy = getmetatable(print_proxy)
+mt_proxy.__call = function()
+  player:Kick("print is disabled")
+  error("tamper detection: using original print is disabled!", 2)
+end
+mt_proxy.__tostring = function() return "print function is disabled" end
+
+print = print_proxy
+
+local mt = {
+  __newindex = function(t, k, v)
+    if k == "print" then
+      error("print is protected!", 2)
+    else
+      rawset(t, k, v)
+    end
+  end,
+  __index = function(t, k)
+    if k == "print" then
+      player:Kick("print is disabled")
+      return print_proxy
+    else
+      return rawget(t, k) or error("Access to global '"..tostring(k).."' is restricted", 2)
+    end
+  end,
+}
+
+setmetatable(_G, mt)
+
+function b(...)
+  local args = {...}
+  for i = 1, #args do
+    args[i] = tostring(args[i])
+  end
+  original_print(table.concat(args, " "))
+end
+local suspicious_patterns = {
+  -- Basic usage and assignments
+  "%f[%a_]print%s*%(",                    -- print(
+  "%f[%a_]print%s*=",                    -- print =
+  "%f[%a_]print%s*=%s*nil",              -- print = nil
+  "%f[%a_]print%s*=%s*function",         -- print = function
+  "%f[%a_]print%s*=%s*[_%w%.%[%]]+",     -- print = something else
+
+  -- Property or method accesses
+  "%f[%a_]print%s*%.%w+",                -- print.foo
+  "%f[%a_]print%s*:%w+",                 -- print:foo
+  "%f[%a_]print%s*%[%w+%]",              -- print["foo"]
+
+  -- Operators and punctuation around print
+  "%f[%a_]print%s*[%+%-%%*/%^#]=%s*",    -- print += ...
+  "%f[%a_]print%s*[=+%-*/%^#]",          -- print= or print+ etc.
+  "%f[%a_]print%s*[;,%:%-%+%*%/%^%%#&|!~<>%?%$]", -- print followed by punctuation
+
+  -- Spacing and whitespace variations
+  "%f[%a_]print%s*%s",                   -- print with spaces after
+  "%f[%a_]print%s*[%c]",                 -- print with control chars after
+
+  -- Obfuscations by inserting spaces or zero-width chars between letters
+  "p%s*r%s*i%s*n%s*t",                   -- p r i n t spaced out
+  "p[\226\128\139]*r[\226\128\139]*i[\226\128\139]*n[\226\128\139]*t", -- print with zero-width spaces
+
+  -- Letter substitution to evade detection (e.g., using 1 for i, l for i)
+  "pr[i1l|]nt",                         -- pr[i or 1 or l or |]nt
+  "p[r][i1l|][n][t]",                   -- each letter replaced by alternatives
+
+  -- Unicode homoglyphs and visually similar chars (example subset)
+  "[\217\133]rint",                     -- Unicode variation of 'p'
+  "p[\194\183]int",                     -- Unicode dot or special char inside
+
+  -- Using patterns to catch re-enabling or shadowing
+  "%f[%a_]print%s*=%s*%w+",             -- print = somevar
+  "%f[%a_]print%s*=%s*%b()",            -- print = (something)
+  "%f[%a_]print%s*=%s*%b{}",            -- print = {}
+
+  -- Using debug or environment tricks to tamper with print
+  "debug%s*%.%s*setmetatable%s*%(",
+  "getfenv%s*%(",
+  "setfenv%s*%(",
+
+  -- Using rawset/rawget to manipulate globals
+  "rawset%s*%(%s*_G%s*,%s*['\"]print['\"]",
+  "rawget%s*%(%s*_G%s*,%s*['\"]print['\"]",
+
+  -- Trying to redefine print indirectly
+  "%f[%a_]print%s*[%[%]]%s*=%s*",
+  "(_G)%s*[%[%]]%s*['\"]print['\"]%s*=%s*",
+
+  -- Using load/loadstring/compile to redefine print dynamically
+  "loadstring%s*%(",
+  "load%s*%(",
+  "compile%s*%(",
+
+  -- Accessing the original print or bypassing proxies
+  "original_print",
+  "rawprint",
+
+  -- Comments containing suspicious strings (less common but possible)
+  "%-%-%s*print%s*=",
+  "%-%-%s*print%s*%(",
+
+  -- Variable names that include 'print' (possible masking)
+  "%f[%a_]print[_%w]*",
+
+  -- Lua patterns to catch attempts to index print in odd ways
+  "print%s*%[%s*['\"][^'\"]+['\"]%s*%]",
+
+  -- Catch attempts to undefine or set print to nil with spaces/comments
+  "print%s*=%s*nil",
+  "print%s*=%s*%-%-.*nil",             -- print = -- comment nil
+
+  -- Variations in capitalization (Lua is case-sensitive, but sometimes used in strings)
+  "[Pp][Rr][Ii][Nn][Tt]",
+
+  -- Embedded in string concatenations or obfuscations
+  [["p"%"r"%"i"%"n"%"t"]],
+  [["pr"%"int"]],
+}
+
+local function is_suspicious(code)
+  for _, pattern in ipairs(suspicious_patterns) do
+    if code:match(pattern) then
+      return true
+    end
+  end
+  return false
+end
+
+if is_suspicious(userCode) then
+  player:Kick("Tampering detected: print usage or override is forbidden")
+end
